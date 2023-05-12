@@ -5,4 +5,13 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bevy = "0.10"
+bevy = { version = "0.10", features = ["jpeg", "png"] }
+bevy_mujoco = { path = "../bevy_mujoco" }                                              # { git = "https://github.com/stillonearth/bevy_mujoco.git", rev = "b03df78" }
+bevy-inspector-egui = { version = "0.18.1" }
+bevy_flycam = { git = "https://github.com/NiklasEi/bevy_flycam.git", rev = "7d69689" }
+rand = "0.8.5"
+serde = "1.0.158"
+serde_derive = "1.0.158"
+serde_json = "1.0.94"
+tract-onnx = { version = "0.20.4" }
+lazy_static = "1.4.0"
