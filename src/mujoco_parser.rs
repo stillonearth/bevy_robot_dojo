@@ -75,7 +75,7 @@ fn parse_body(element: &Node) -> Result<Body> {
         name: name.to_string(),
         pos,
         geom: parse_geom(&geom_node)?,
-        children: vec![], // This will be populated later
+        children: vec![], //parse_parent_node(element)?,
     };
 
     Ok(body)
@@ -121,6 +121,19 @@ fn parse_geom(element: &Node) -> Result<Geom> {
     Ok(body)
 }
 
+pub fn parse_parent_node(node: &Node) -> Result<Vec<Body>> {
+    let mut bodies: Vec<Body> = vec![];
+
+    for element in node.children() {
+        if element.tag_name().name() == "body" {
+            let body = parse_body(&element)?;
+            bodies.push(body);
+        }
+    }
+
+    Ok(bodies)
+}
+
 pub fn parse_mujoco_config(filename: &str) -> Result<()> {
     // load filename file to String
     let document = fs::read_to_string(filename)?;
@@ -132,13 +145,9 @@ pub fn parse_mujoco_config(filename: &str) -> Result<()> {
         .find(|n| n.tag_name().name() == "worldbody")
         .unwrap();
 
-    for element in worldbody_element.children() {
-        if element.tag_name().name() == "body" {
-            let body = parse_body(&element)?;
-            println!("Body: {:?}", body);
-        } else {
-            println!("Unknown element: {}", element.tag_name().name());
-        }
+    let bodies = parse_parent_node(&worldbody_element)?;
+    for body in bodies.iter() {
+        println!("body {:?}", body);
     }
 
     Ok(())
