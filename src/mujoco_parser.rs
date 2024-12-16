@@ -3,16 +3,18 @@ use std::fs;
 use anyhow::*;
 use regex::Regex;
 use roxmltree::*;
+use serde::Serialize;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Body {
     pub pos: (f32, f32, f32),
-    pub name: String,
+    pub name: Option<String>,
     pub geom: Geom,
     pub children: Vec<Body>,
+    pub joint: Option<Joint>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Geom {
     pub from: Option<(f32, f32, f32)>,
     pub to: Option<(f32, f32, f32)>,
@@ -22,7 +24,71 @@ pub struct Geom {
     pub geom_type: String,
 }
 
-fn parse_pos(repr: &str) -> Result<(f32, f32, f32)> {
+#[derive(Debug, Serialize)]
+pub struct Joint {
+    pub pos: (f32, f32, f32),
+    pub axis: Option<(f32, f32, f32)>,
+    pub range: Option<(f32, f32)>,
+    pub name: Option<String>,
+    pub joint_type: String,
+    pub margin: Option<f32>,
+}
+
+fn parse_joint(element: &Node) -> Result<Joint> {
+    let pos_attr = element
+        .attribute("pos")
+        .ok_or_else(|| anyhow!("Missing 'pos' attribute in body element"))?;
+    let pos = parse_3_vec(pos_attr)?;
+    let name = element.attribute("name").map(|s| s.to_string());
+    let joint_type = element
+        .attribute("type")
+        .ok_or_else(|| anyhow!("Missing 'type' attribute in body element"))?
+        .to_string();
+    let range = if let Some(range_attr) = element.attribute("range") {
+        Some(parse_range(range_attr)?)
+    } else {
+        None
+    };
+    let axis = if let Some(axis_attr) = element.attribute("axis") {
+        Some(parse_3_vec(axis_attr)?)
+    } else {
+        None
+    };
+
+    let margin = if let Some(margin_attr) = element.attribute("margin") {
+        let mrg: f32 = margin_attr.parse()?;
+        Some(mrg)
+    } else {
+        None
+    };
+
+    let joint = Joint {
+        name: name,
+        pos,
+        joint_type,
+        range,
+        axis,
+        margin,
+    };
+
+    Ok(joint)
+}
+
+fn parse_range(repr: &str) -> Result<(f32, f32)> {
+    let re =
+        Regex::new(r"^(?P<from>[+-]?([0-9]*[.])?[0-9]+) (?P<to>[+-]?([0-9]*[.])?[0-9]+)$").unwrap();
+
+    let coorinates = re
+        .captures(repr)
+        .ok_or_else(|| anyhow!("Can't parse attribute"))?;
+
+    let from: f32 = coorinates["from"].parse()?;
+    let to: f32 = coorinates["to"].parse()?;
+
+    return Ok((from, to));
+}
+
+fn parse_3_vec(repr: &str) -> Result<(f32, f32, f32)> {
     let re =
         Regex::new(r"^(?P<x>[+-]?([0-9]*[.])?[0-9]+) (?P<y>[+-]?([0-9]*[.])?[0-9]+) (?P<z>[+-]?([0-9]*[.])?[0-9]+)$")
             .unwrap();
@@ -40,7 +106,7 @@ fn parse_pos(repr: &str) -> Result<(f32, f32, f32)> {
 
 fn parse_fromto(repr: &str) -> Result<((f32, f32, f32), (f32, f32, f32))> {
     let re =
-        Regex::new(r"^(?P<x1>[+-]?([0-9]*[.])?[0-9]+) (?P<y1>[+-]?([0-9]*[.])?[0-9]+) (?P<z1>[+-]?([0-9]*[.])?[0-9]+ (?P<x2>[+-]?([0-9]*[.])?[0-9]+) (?P<y2>[+-]?([0-9]*[.])?[0-9]+) (?P<z2>[+-]?([0-9]*[.])?[0-9]+))$")
+        Regex::new(r"^(?<x1>-?\d+\.\d+)\s+(?<y1>-?\d+\.\d+)\s+(?<z1>-?\d+\.\d+)\s+(?<x2>-?\d+\.\d+)\s+(?<y2>-?\d+\.\d+)\s+(?<z2>-?\d+\.\d+)$")
             .unwrap();
 
     let coorinates = re
@@ -62,20 +128,25 @@ fn parse_body(element: &Node) -> Result<Body> {
     let pos_attr = element
         .attribute("pos")
         .ok_or_else(|| anyhow!("Missing 'pos' attribute in body element"))?;
-    let pos = parse_pos(pos_attr)?;
-    let name = element
-        .attribute("name")
-        .ok_or_else(|| anyhow!("Missing 'name' attribute in body element"))?;
+    let pos = parse_3_vec(pos_attr)?;
+    let name = element.attribute("name").map(|s| s.to_string());
     let geom_node = element
         .descendants()
         .find(|n| n.tag_name().name() == "geom")
         .ok_or_else(|| anyhow!("Missing 'geom' node in body element"))?;
 
+    let joint_node = element
+        .descendants()
+        .find(|n| n.tag_name().name() == "joint")
+        .ok_or_else(|| anyhow!("Missing 'joint' node in body element"))?;
+    let joint = parse_joint(&joint_node)?;
+
     let body = Body {
-        name: name.to_string(),
+        name,
         pos,
         geom: parse_geom(&geom_node)?,
-        children: vec![], //parse_parent_node(element)?,
+        children: parse_parent_node(element)?,
+        joint: Some(joint),
     };
 
     Ok(body)
@@ -93,7 +164,7 @@ fn parse_geom(element: &Node) -> Result<Geom> {
     }
 
     if let Some(pos_attr) = element.attribute("pos") {
-        let pos_ = parse_pos(pos_attr)?;
+        let pos_ = parse_3_vec(pos_attr)?;
         pos = Some(pos_);
     }
 
@@ -147,7 +218,7 @@ pub fn parse_mujoco_config(filename: &str) -> Result<()> {
 
     let bodies = parse_parent_node(&worldbody_element)?;
     for body in bodies.iter() {
-        println!("body {:?}", body);
+        println!("body {}", serde_json::to_string_pretty(body).unwrap());
     }
 
     Ok(())
