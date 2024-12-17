@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.94"
-avian3d = "0.1"
+avian3d = "0.1.2"
 bevy = { version = "0.15", features = ["jpeg", "png"] }
 bevy-inspector-egui = { version = "0.28" }
 lazy_static = "1.5.0"

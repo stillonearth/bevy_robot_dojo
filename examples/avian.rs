@@ -1,56 +1,70 @@
-use avian3d::prelude::*;
+use avian3d::{math::*, prelude::*};
 use bevy::prelude::*;
+use examples_common_3d::ExampleCommonPlugin;
 
 fn main() {
     App::new()
-        // Enable physics
-        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins((
+            DefaultPlugins,
+            ExampleCommonPlugin,
+            PhysicsPlugins::default(),
+        ))
+        .insert_resource(ClearColor(Color::srgb(0.05, 0.05, 0.1)))
+        .insert_resource(SubstepCount(50))
         .add_systems(Startup, setup)
         .run();
 }
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    // Static physics object with a collision shape
-    commands.spawn((
-        RigidBody::Static,
-        Collider::cylinder(4.0, 0.1),
-        PbrBundle {
-            mesh: meshes.add(Cylinder::new(4.0, 0.1)),
-            material: materials.add(Color::WHITE),
-            ..default()
-        },
-    ));
+    let cube_mesh = meshes.add(Cuboid::default());
+    let cube_material = materials.add(Color::srgb(0.8, 0.7, 0.6));
 
-    // Dynamic physics object with a collision shape and initial angular velocity
-    commands.spawn((
-        RigidBody::Dynamic,
-        Collider::cuboid(1.0, 1.0, 1.0),
-        AngularVelocity(Vec3::new(2.5, 3.5, 1.5)),
-        PbrBundle {
-            mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-            material: materials.add(Color::srgb_u8(124, 144, 255)),
-            transform: Transform::from_xyz(0.0, 4.0, 0.0),
-            ..default()
-        },
-    ));
+    // Kinematic rotating "anchor" object
+    let anchor = commands
+        .spawn((
+            Mesh3d(cube_mesh.clone()),
+            MeshMaterial3d(cube_material.clone()),
+            RigidBody::Kinematic,
+            AngularVelocity(Vector::Z * 1.5),
+        ))
+        .id();
 
-    // Light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
+    // Dynamic object rotating around anchor
+    let object = commands
+        .spawn((
+            Mesh3d(cube_mesh),
+            MeshMaterial3d(cube_material),
+            Transform::from_xyz(1.5, 0.0, 0.0),
+            RigidBody::Dynamic,
+            MassPropertiesBundle::from_shape(&Cuboid::from_length(1.0), 1.0),
+        ))
+        .id();
+
+    // Connect anchor and dynamic object
+    commands.spawn(
+        PrismaticJoint::new(anchor, object)
+            .with_local_anchor_1(Vector::X)
+            .with_free_axis(Vector::X)
+            .with_limits(0.5, 2.0),
+    );
+
+    // Directional light
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 2000.0,
             shadows_enabled: true,
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
+        Transform::default().looking_at(Vec3::new(-1.0, -2.5, -1.5), Vec3::Y),
+    ));
 
     // Camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Dir3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_translation(Vec3::Z * 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 }
