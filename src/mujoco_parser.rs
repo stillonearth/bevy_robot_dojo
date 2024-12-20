@@ -1,9 +1,14 @@
-use std::fs;
-
-use anyhow::*;
+// use anyhow::*;
+use bevy::asset::io::Reader;
+use bevy::asset::AssetLoader;
+use bevy::asset::LoadContext;
+use bevy::prelude::*;
 use regex::Regex;
-use roxmltree::*;
 use serde::Serialize;
+
+use anyhow::anyhow;
+use anyhow::Result;
+use thiserror::Error;
 
 #[derive(Debug, Serialize)]
 pub struct Body {
@@ -34,7 +39,7 @@ pub struct Joint {
     pub margin: Option<f32>,
 }
 
-fn parse_joint(element: &Node) -> Result<Joint> {
+fn parse_joint(element: &roxmltree::Node) -> Result<Joint> {
     let pos_attr = element
         .attribute("pos")
         .ok_or_else(|| anyhow!("Missing 'pos' attribute in body element"))?;
@@ -124,7 +129,7 @@ fn parse_fromto(repr: &str) -> Result<((f32, f32, f32), (f32, f32, f32))> {
     return Ok(((x1, y1, z1), (x2, y2, z2)));
 }
 
-fn parse_body(element: &Node) -> Result<Body> {
+fn parse_body(element: &roxmltree::Node) -> Result<Body> {
     let pos_attr = element
         .attribute("pos")
         .ok_or_else(|| anyhow!("Missing 'pos' attribute in body element"))?;
@@ -152,7 +157,7 @@ fn parse_body(element: &Node) -> Result<Body> {
     Ok(body)
 }
 
-fn parse_geom(element: &Node) -> Result<Geom> {
+fn parse_geom(element: &roxmltree::Node) -> Result<Geom> {
     let mut from: Option<(f32, f32, f32)> = None;
     let mut to: Option<(f32, f32, f32)> = None;
     let mut pos: Option<(f32, f32, f32)> = None;
@@ -192,7 +197,7 @@ fn parse_geom(element: &Node) -> Result<Geom> {
     Ok(body)
 }
 
-pub fn parse_parent_node(node: &Node) -> Result<Vec<Body>> {
+pub fn parse_parent_node(node: &roxmltree::Node) -> Result<Vec<Body>> {
     let mut bodies: Vec<Body> = vec![];
 
     for element in node.children() {
@@ -205,21 +210,55 @@ pub fn parse_parent_node(node: &Node) -> Result<Vec<Body>> {
     Ok(bodies)
 }
 
-pub fn parse_mujoco_config(filename: &str) -> Result<()> {
-    // load filename file to String
-    let document = fs::read_to_string(filename)?;
+pub fn parse_mujoco_config(document: &str) -> Result<Vec<Body>> {
     let xml_document = roxmltree::Document::parse(&document)?;
 
-    // 1. Parse Worldbody
     let worldbody_element = xml_document
         .descendants()
         .find(|n| n.tag_name().name() == "worldbody")
         .unwrap();
 
     let bodies = parse_parent_node(&worldbody_element)?;
-    for body in bodies.iter() {
-        println!("body {}", serde_json::to_string_pretty(body).unwrap());
-    }
 
-    Ok(())
+    Ok(bodies)
+}
+
+// Custom Loader
+
+#[derive(Default)]
+pub struct MuJoCoFileLoader;
+
+#[derive(Asset, TypePath, Debug, Deref)]
+pub struct MuJoCoFile(pub Vec<Body>);
+
+/// Possible errors that can be produced by [`RpyAssetLoader`]
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum MuJoCoFileLoaderError {
+    /// An [IO](std::io) Error
+    #[error("Could not load file: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl AssetLoader for MuJoCoFileLoader {
+    type Asset = MuJoCoFile;
+    type Settings = ();
+    type Error = MuJoCoFileLoaderError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &(),
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        info!("Loading XML...");
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        let content = std::str::from_utf8(&bytes).unwrap();
+        let bodies = parse_mujoco_config(content).unwrap();
+
+        println!("loaded asset, {:?}", bodies);
+
+        Ok(MuJoCoFile(bodies))
+    }
 }
