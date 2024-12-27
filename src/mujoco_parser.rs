@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use thiserror::Error;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Body {
     pub pos: (f32, f32, f32),
     pub name: Option<String>,
@@ -19,7 +19,7 @@ pub struct Body {
     pub joint: Option<Joint>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Geom {
     pub from: Option<(f32, f32, f32)>,
     pub to: Option<(f32, f32, f32)>,
@@ -29,7 +29,7 @@ pub struct Geom {
     pub geom_type: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Joint {
     pub pos: (f32, f32, f32),
     pub axis: Option<(f32, f32, f32)>,
@@ -37,6 +37,27 @@ pub struct Joint {
     pub name: Option<String>,
     pub joint_type: String,
     pub margin: Option<f32>,
+}
+
+// Body Implementation
+
+impl Body {
+    /// Return the body to be rendered
+    pub fn mesh(&self) -> Option<Mesh> {
+        let size = self.geom.size;
+        Some(match self.geom.geom_type.as_str() {
+            "sphere" => Sphere::default()
+                .mesh()
+                .ico(5)
+                .unwrap()
+                .scaled_by(Vec3::ONE * size),
+            "capsule" => Capsule3d::default()
+                .mesh()
+                .build()
+                .scaled_by(Vec3::ONE * size),
+            _ => todo!(),
+        })
+    }
 }
 
 fn parse_joint(element: &roxmltree::Node) -> Result<Joint> {
@@ -256,8 +277,6 @@ impl AssetLoader for MuJoCoFileLoader {
         reader.read_to_end(&mut bytes).await?;
         let content = std::str::from_utf8(&bytes).unwrap();
         let bodies = parse_mujoco_config(content).unwrap();
-
-        println!("loaded asset, {:?}", bodies);
 
         Ok(MuJoCoFile(bodies))
     }
