@@ -29,7 +29,7 @@ pub struct Geom {
     pub geom_type: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Component)]
 pub struct Joint {
     pub pos: (f32, f32, f32),
     pub axis: Option<(f32, f32, f32)>,
@@ -50,13 +50,81 @@ impl Body {
                 .mesh()
                 .ico(5)
                 .unwrap()
-                .scaled_by(Vec3::ONE * size),
-            "capsule" => Capsule3d::default()
-                .mesh()
-                .build()
-                .scaled_by(Vec3::ONE * size),
+                .scaled_by(Vec3::ONE * size * 2.0),
+            "capsule" => {
+                if let Some(from) = self.geom.from
+                    && let Some(to) = self.geom.to
+                {
+                    let v1 = Vec3::new(from.0, from.1, from.2);
+                    let v2 = Vec3::new(to.0, to.1, to.2);
+
+                    let length = (v2 - v1).length();
+
+                    return Some(
+                        Capsule3d {
+                            half_length: length / 2.0,
+                            radius: self.geom.size,
+                        }
+                        .mesh()
+                        .build(),
+                    );
+                }
+
+                return Some(Capsule3d::default().mesh().build());
+            }
             _ => todo!(),
         })
+    }
+}
+
+impl Geom {
+    /// Return the body to be rendered
+    pub fn rotation(&self) -> Quat {
+        match self.geom_type.as_str() {
+            "capsule" => {
+                if let Some(from) = self.from
+                    && let Some(to) = self.to
+                {
+                    let v1 = Vec3::new(from.0, from.2, from.1);
+                    let v2 = Vec3::new(to.0, to.2, to.1);
+
+                    let to = (v2 - v1).normalize();
+                    let from = Vec3::new(0.0, 1.0, 0.0);
+                    let rotation = Quat::from_rotation_arc(from, to);
+
+                    return rotation;
+                }
+
+                Quat::IDENTITY
+            }
+            _ => Quat::IDENTITY,
+        }
+    }
+
+    pub fn postion(&self) -> Vec3 {
+        if let Some((x, z, y)) = self.pos {
+            return Vec3::new(x, z, y);
+        }
+
+        match self.geom_type.as_str() {
+            "capsule" => {
+                if let Some(from) = self.from
+                    && let Some(to) = self.to
+                {
+                    let v1 = Vec3::new(from.0, from.2, from.1);
+                    let v2 = Vec3::new(to.0, to.2, to.1);
+
+                    return (v2 - v1) / 2.0;
+                }
+
+                Vec3::ZERO
+            }
+            _ => Vec3::ZERO,
+        }
+    }
+
+    pub fn transform(&self) -> Transform {
+        Transform::from_translation(self.postion()).with_rotation(self.rotation())
     }
 }
 

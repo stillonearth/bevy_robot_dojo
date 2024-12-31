@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
+#![feature(let_chains)]
 
 mod mujoco_parser;
 
@@ -6,17 +7,19 @@ use std::{cell::RefCell, rc::Rc};
 
 use bevy::{
     asset::RenderAssetUsages,
-    color::palettes::css::SILVER,
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use bevy_flycam::*;
-use mujoco_parser::{Body, Geom, MuJoCoFile};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use mujoco_parser::{Body, MuJoCoFile};
+
 use trees::Tree;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(WorldInspectorPlugin::new())
         .init_asset::<mujoco_parser::MuJoCoFile>()
         .init_asset_loader::<mujoco_parser::MuJoCoFileLoader>()
         .add_systems(Startup, setup)
@@ -93,7 +96,7 @@ fn spawn_mujoco_model(
     mut app_state: ResMut<NextState<AppState>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    images: ResMut<Assets<Image>>,
     // mujoco: ResMut<MuJoCoSimulation>,
 ) {
     let mujoco_file = rpy_assets.get(mujoco_handle.0.id());
@@ -101,19 +104,9 @@ fn spawn_mujoco_model(
         return;
     }
 
-    //
-    // let debug_material = materials.add(StandardMaterial {
-    //     base_color_texture: Some(images.add(uv_debug_texture())),
-    //     ..default()
-    // });
+    app_state.set(AppState::Simulation);
 
-    // if let Some(mesh) = root_body.mesh() {
-    //     let shape = meshes.add(mesh);
-    //     let (x, z, y) = root_body.pos;
-
-    // }
-
-    // This is a closure that can call itself recursively
+    // Closure that can call itself recursively
     struct SpawnEntities<'s> {
         f: &'s dyn Fn(&SpawnEntities, Body, &mut ChildBuilder, usize),
     }
@@ -134,13 +127,10 @@ fn spawn_mujoco_model(
             if mesh.is_none() {
                 return;
             }
+            let mesh = mesh.unwrap();
             let (x, z, y) = body.pos;
-            let mut body_transform = Transform::from_xyz(x, y, z);
-            let geom_transform = if let Some((x, z, y)) = body.geom.pos {
-                Transform::from_xyz(x, y, z)
-            } else {
-                Transform::IDENTITY
-            };
+            let body_transform = Transform::from_xyz(x, y, z);
+            let geom_transform: Transform = body.geom.transform();
 
             let mut binding: EntityCommands;
             {
@@ -148,13 +138,16 @@ fn spawn_mujoco_model(
                 let mut meshes = meshes.borrow_mut();
                 let mut images = images.borrow_mut();
 
+                let body_name = body.name.clone().unwrap_or_default();
+
                 binding = child_builder.spawn((
-                    Name::new(format!(
-                        "MuJoCo::body_{}",
-                        body.name.clone().unwrap_or_default().as_str()
-                    )),
+                    Name::new(format!("MuJoCo::body_{}", body_name.as_str())),
                     body_transform,
                 ));
+
+                if let Some(joint) = body.joint.clone() {
+                    binding.insert(joint);
+                }
 
                 let debug_material = materials.add(StandardMaterial {
                     base_color_texture: Some(images.add(uv_debug_texture())),
@@ -163,7 +156,7 @@ fn spawn_mujoco_model(
 
                 binding.with_children(|children| {
                     let mut cmd = children.spawn((
-                        Mesh3d(meshes.add(mesh.unwrap())),
+                        Mesh3d(meshes.add(mesh)),
                         MeshMaterial3d(debug_material.clone()),
                         geom_transform,
                     ));
@@ -209,14 +202,12 @@ fn spawn_mujoco_model(
     let mut commands = commands.borrow_mut();
     let bodies = mujoco_file.unwrap().0.clone();
     commands
-        .spawn((Name::new("MuJoCo::world")))
+        .spawn((Name::new("MuJoCo::world"), Transform::IDENTITY))
         .with_children(|child_builder| {
             for body in bodies {
                 (spawn_entities.f)(&spawn_entities, body, child_builder, 0);
             }
         });
-
-    app_state.set(AppState::Simulation);
 }
 
 /// Creates a colorful test pattern
