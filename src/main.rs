@@ -7,8 +7,14 @@ use std::{cell::RefCell, rc::Rc};
 
 use bevy::{
     asset::RenderAssetUsages,
+    color::palettes::css::*,
+    pbr::wireframe::{NoWireframe, WireframeColor, WireframeConfig, WireframePlugin},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render::{
+        render_resource::{Extent3d, TextureDimension, TextureFormat},
+        settings::{RenderCreation, WgpuFeatures, WgpuSettings},
+        RenderPlugin,
+    },
 };
 use bevy_flycam::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -18,7 +24,27 @@ use trees::Tree;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((
+            DefaultPlugins.set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    // WARN this is a native only feature. It will not work with webgl or webgpu
+                    features: WgpuFeatures::POLYGON_MODE_LINE,
+                    ..default()
+                }),
+                ..default()
+            }),
+            // You need to add this plugin to enable wireframe rendering
+            WireframePlugin,
+        ))
+        .insert_resource(WireframeConfig {
+            // The global wireframe config enables drawing of wireframes on every mesh,
+            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
+            // regardless of the global configuration.
+            global: true,
+            // Controls the default color of all wireframes. Used as the default color for global wireframes.
+            // Can be changed per mesh using the `WireframeColor` component.
+            default_color: WHITE.into(),
+        })
         .add_plugins(WorldInspectorPlugin::new())
         .init_asset::<mujoco_parser::MuJoCoFile>()
         .init_asset_loader::<mujoco_parser::MuJoCoFileLoader>()
@@ -59,14 +85,15 @@ fn setup(
     ));
 
     // ground plane
-    // commands.spawn((
-    //     Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0).subdivisions(10))),
-    //     MeshMaterial3d(materials.add(Color::from(SILVER))),
-    // ));
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0).subdivisions(10))),
+        MeshMaterial3d(materials.add(Color::from(SILVER))),
+        NoWireframe,
+    ));
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 2., 2.0).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
+        Transform::from_xyz(0.0, 4., 4.0).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
         FlyCam,
     ));
 }
@@ -159,6 +186,7 @@ fn spawn_mujoco_model(
                         Mesh3d(meshes.add(mesh)),
                         MeshMaterial3d(debug_material.clone()),
                         geom_transform,
+                        WireframeColor { color: LIME.into() },
                     ));
 
                     cmd.insert(Name::new(format!(
