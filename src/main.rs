@@ -5,6 +5,7 @@ mod mujoco_parser;
 
 use std::{cell::RefCell, rc::Rc};
 
+use avian3d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
     color::palettes::css::*,
@@ -15,6 +16,7 @@ use bevy::{
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
         RenderPlugin,
     },
+    state::commands,
 };
 use bevy_flycam::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -27,25 +29,20 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(WgpuSettings {
-                    // WARN this is a native only feature. It will not work with webgl or webgpu
                     features: WgpuFeatures::POLYGON_MODE_LINE,
                     ..default()
                 }),
                 ..default()
             }),
-            // You need to add this plugin to enable wireframe rendering
             WireframePlugin,
+            PhysicsPlugins::default(),
+            WorldInspectorPlugin::new(),
         ))
         .insert_resource(WireframeConfig {
-            // The global wireframe config enables drawing of wireframes on every mesh,
-            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
-            // regardless of the global configuration.
             global: true,
-            // Controls the default color of all wireframes. Used as the default color for global wireframes.
-            // Can be changed per mesh using the `WireframeColor` component.
             default_color: WHITE.into(),
         })
-        .add_plugins(WorldInspectorPlugin::new())
+        // .insert_resource(SubstepCount(50))
         .init_asset::<mujoco_parser::MuJoCoFile>()
         .init_asset_loader::<mujoco_parser::MuJoCoFileLoader>()
         .add_systems(Startup, setup)
@@ -55,9 +52,9 @@ fn main() {
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()
-        .add_plugins(NoCameraPlayerPlugin)
+        // .add_plugins(NoCameraPlayerPlugin)
         .insert_resource(MovementSettings {
-            speed: 1.0,
+            speed: 2.0,
             ..default()
         })
         .run();
@@ -85,16 +82,18 @@ fn setup(
     ));
 
     // ground plane
+    let cube_mesh = meshes.add(Cuboid::default());
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(50.0, 50.0).subdivisions(10))),
-        MeshMaterial3d(materials.add(Color::from(SILVER))),
-        NoWireframe,
+        Mesh3d(cube_mesh.clone()),
+        MeshMaterial3d(materials.add(Color::srgb(0.7, 0.7, 0.8))),
+        Transform::from_xyz(0.0, -2.0, 0.0).with_scale(Vec3::new(100.0, 1.0, 100.0)),
+        RigidBody::Static,
+        Collider::cuboid(1.0, 1.0, 1.0),
     ));
-
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 4., 4.0).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
-        FlyCam,
+        Transform::from_xyz(5., 9., 18.).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
+        // FlyCam,
     ));
 }
 
@@ -105,16 +104,11 @@ enum AppState {
     Simulation,
 }
 
-/// BodyTree restructures body list into a tree structure
-/// All translations and quaternions are relative to the parent body
 #[derive(Deref, DerefMut)]
 pub struct BodyTree(pub Tree<Body>);
 
 #[derive(Resource)]
 struct MuJoCoFileHandle(Handle<MuJoCoFile>);
-
-#[derive(Component)]
-struct Shape;
 
 fn spawn_mujoco_model(
     mut commands: Commands,
@@ -135,7 +129,7 @@ fn spawn_mujoco_model(
 
     // Closure that can call itself recursively
     struct SpawnEntities<'s> {
-        f: &'s dyn Fn(&SpawnEntities, Body, &mut ChildBuilder, usize),
+        f: &'s dyn Fn(&SpawnEntities, Option<Body>, Body, &mut ChildBuilder, usize),
     }
 
     impl SpawnEntities<'_> {
@@ -144,21 +138,13 @@ fn spawn_mujoco_model(
         fn spawn_body(
             &self,
             child_builder: &mut ChildBuilder,
+            parent_body: Option<Body>,
             body: &Body,
             meshes: &Rc<RefCell<ResMut<Assets<Mesh>>>>,
             materials: &Rc<RefCell<ResMut<Assets<StandardMaterial>>>>,
             images: &Rc<RefCell<ResMut<Assets<Image>>>>,
             add_children: impl FnOnce(&mut ChildBuilder),
         ) {
-            let mesh = body.mesh();
-            if mesh.is_none() {
-                return;
-            }
-            let mesh = mesh.unwrap();
-            let (x, z, y) = body.pos;
-            let body_transform = Transform::from_xyz(x, y, z);
-            let geom_transform: Transform = body.geom.transform();
-
             let mut binding: EntityCommands;
             {
                 let mut materials = materials.borrow_mut();
@@ -169,30 +155,31 @@ fn spawn_mujoco_model(
 
                 binding = child_builder.spawn((
                     Name::new(format!("MuJoCo::body_{}", body_name.as_str())),
-                    body_transform,
+                    body.transform(),
                 ));
 
                 if let Some(joint) = body.joint.clone() {
                     binding.insert(joint);
                 }
 
-                let debug_material = materials.add(StandardMaterial {
-                    base_color_texture: Some(images.add(uv_debug_texture())),
-                    ..default()
-                });
-
                 binding.with_children(|children| {
                     let mut cmd = children.spawn((
-                        Mesh3d(meshes.add(mesh)),
-                        MeshMaterial3d(debug_material.clone()),
-                        geom_transform,
+                        Mesh3d(meshes.add(body.geom.mesh())),
+                        body.geom.transform(),
                         WireframeColor { color: LIME.into() },
+                        Name::new(format!(
+                            "MuJoCo::mesh_{}",
+                            body.name.clone().unwrap_or_default().as_str()
+                        )),
                     ));
 
-                    cmd.insert(Name::new(format!(
-                        "MuJoCo::mesh_{}",
-                        body.name.clone().unwrap_or_default().as_str()
-                    )));
+                    if parent_body.is_none() || parent_body.unwrap().joint.is_some() {
+                        cmd.insert((
+                            RigidBody::Dynamic,
+                            body.geom.mass_properties_bundle(),
+                            body.geom.collider(),
+                        ));
+                    }
                 });
             }
 
@@ -206,15 +193,16 @@ fn spawn_mujoco_model(
     let commands = Rc::new(RefCell::new(commands));
 
     let spawn_entities = SpawnEntities {
-        f: &|func, body, child_builder, depth| {
+        f: &|func, parent_body, body, child_builder, depth| {
             let add_children = |child_builder: &mut ChildBuilder| {
                 for child in body.clone().children {
-                    (func.f)(func, child, child_builder, depth + 1);
+                    (func.f)(func, Some(body.clone()), child, child_builder, depth + 1);
                 }
             };
 
             func.spawn_body(
                 child_builder,
+                parent_body.clone(),
                 &body.clone(),
                 &meshes,
                 &materials,
@@ -224,16 +212,13 @@ fn spawn_mujoco_model(
         },
     };
 
-    //
-    // return;
-
     let mut commands = commands.borrow_mut();
     let bodies = mujoco_file.unwrap().0.clone();
     commands
         .spawn((Name::new("MuJoCo::world"), Transform::IDENTITY))
         .with_children(|child_builder| {
             for body in bodies {
-                (spawn_entities.f)(&spawn_entities, body, child_builder, 0);
+                (spawn_entities.f)(&spawn_entities, None, body, child_builder, 0);
             }
         });
 }

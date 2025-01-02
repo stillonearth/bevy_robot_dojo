@@ -1,3 +1,7 @@
+use avian3d::parry::na;
+use avian3d::parry::shape;
+use avian3d::prelude::Collider;
+use avian3d::prelude::MassPropertiesBundle;
 // use anyhow::*;
 use bevy::asset::io::Reader;
 use bevy::asset::AssetLoader;
@@ -10,6 +14,16 @@ use anyhow::anyhow;
 use anyhow::Result;
 use thiserror::Error;
 
+#[derive(Debug, Serialize, Clone, Component)]
+pub struct Joint {
+    pub pos: (f32, f32, f32),
+    pub axis: Option<(f32, f32, f32)>,
+    pub range: Option<(f32, f32)>,
+    pub name: Option<String>,
+    pub joint_type: String,
+    pub margin: Option<f32>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct Body {
     pub pos: (f32, f32, f32),
@@ -17,6 +31,18 @@ pub struct Body {
     pub geom: Geom,
     pub children: Vec<Body>,
     pub joint: Option<Joint>,
+}
+
+impl Body {
+    pub fn transform(&self) -> Transform {
+        let (x, z, y) = self.pos;
+        Transform::from_xyz(x, y, z)
+    }
+}
+
+pub enum Shape {
+    Sphere { object: Sphere },
+    Capsule3d { object: Capsule3d },
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -29,55 +55,59 @@ pub struct Geom {
     pub geom_type: String,
 }
 
-#[derive(Debug, Serialize, Clone, Component)]
-pub struct Joint {
-    pub pos: (f32, f32, f32),
-    pub axis: Option<(f32, f32, f32)>,
-    pub range: Option<(f32, f32)>,
-    pub name: Option<String>,
-    pub joint_type: String,
-    pub margin: Option<f32>,
-}
+impl Geom {
+    pub fn mesh(&self) -> Mesh {
+        let shape = self.shape();
 
-// Body Implementation
+        match shape {
+            Shape::Sphere { object } => object.mesh().ico(5).unwrap(),
+            Shape::Capsule3d { object } => object.mesh().build(),
+        }
+    }
 
-impl Body {
-    /// Return the body to be rendered
-    pub fn mesh(&self) -> Option<Mesh> {
-        let size = self.geom.size;
-        Some(match self.geom.geom_type.as_str() {
-            "sphere" => Sphere::default()
-                .mesh()
-                .ico(5)
-                .unwrap()
-                .scaled_by(Vec3::ONE * size * 2.0),
+    pub fn collider(&self) -> Collider {
+        let shape = self.shape();
+        match shape {
+            Shape::Sphere { object } => Collider::sphere(object.radius),
+            Shape::Capsule3d { object } => {
+                Collider::capsule(object.radius, object.half_length * 2.0)
+            }
+        }
+    }
+
+    pub fn shape(&self) -> Shape {
+        let size = self.size;
+
+        match self.geom_type.as_str() {
+            "sphere" => Shape::Sphere {
+                object: Sphere { radius: size * 2.0 },
+            },
             "capsule" => {
-                if let Some(from) = self.geom.from
-                    && let Some(to) = self.geom.to
-                {
+                if self.from.is_none() && self.to.is_none() {
+                    Shape::Capsule3d {
+                        object: Capsule3d::default(),
+                    }
+                } else {
+                    let from = self.from.unwrap();
+                    let to = self.to.unwrap();
+
                     let v1 = Vec3::new(from.0, from.1, from.2);
                     let v2 = Vec3::new(to.0, to.1, to.2);
 
                     let length = (v2 - v1).length();
 
-                    return Some(
-                        Capsule3d {
+                    Shape::Capsule3d {
+                        object: Capsule3d {
                             half_length: length / 2.0,
-                            radius: self.geom.size,
-                        }
-                        .mesh()
-                        .build(),
-                    );
+                            radius: size,
+                        },
+                    }
                 }
-
-                return Some(Capsule3d::default().mesh().build());
             }
             _ => todo!(),
-        })
+        }
     }
-}
 
-impl Geom {
     /// Return the body to be rendered
     pub fn rotation(&self) -> Quat {
         match self.geom_type.as_str() {
@@ -120,6 +150,15 @@ impl Geom {
                 Vec3::ZERO
             }
             _ => Vec3::ZERO,
+        }
+    }
+
+    pub fn mass_properties_bundle(&self) -> MassPropertiesBundle {
+        let shape = self.shape();
+
+        match shape {
+            Shape::Sphere { object } => MassPropertiesBundle::from_shape(&object, 1.0),
+            Shape::Capsule3d { object } => MassPropertiesBundle::from_shape(&object, 1.0),
         }
     }
 
@@ -225,22 +264,23 @@ fn parse_body(element: &roxmltree::Node) -> Result<Body> {
     let pos = parse_3_vec(pos_attr)?;
     let name = element.attribute("name").map(|s| s.to_string());
     let geom_node = element
-        .descendants()
+        .children()
         .find(|n| n.tag_name().name() == "geom")
         .ok_or_else(|| anyhow!("Missing 'geom' node in body element"))?;
 
-    let joint_node = element
-        .descendants()
-        .find(|n| n.tag_name().name() == "joint")
-        .ok_or_else(|| anyhow!("Missing 'joint' node in body element"))?;
-    let joint = parse_joint(&joint_node)?;
+    let joint_node = element.children().find(|n| n.tag_name().name() == "joint");
+    let joint = if joint_node.is_some() {
+        Some(parse_joint(&joint_node.unwrap())?)
+    } else {
+        None
+    };
 
     let body = Body {
         name,
         pos,
         geom: parse_geom(&geom_node)?,
         children: parse_parent_node(element)?,
-        joint: Some(joint),
+        joint: joint,
     };
 
     Ok(body)
