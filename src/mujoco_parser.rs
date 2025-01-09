@@ -24,7 +24,7 @@ pub struct Joint {
     pub margin: Option<f32>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Component)]
 pub struct Body {
     pub pos: (f32, f32, f32),
     pub name: Option<String>,
@@ -45,7 +45,7 @@ pub enum Shape {
     Capsule3d { object: Capsule3d },
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Component)]
 pub struct Geom {
     pub from: Option<(f32, f32, f32)>,
     pub to: Option<(f32, f32, f32)>,

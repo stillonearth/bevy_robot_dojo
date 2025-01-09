@@ -7,22 +7,17 @@ use std::{cell::RefCell, rc::Rc};
 
 use avian3d::prelude::*;
 use bevy::{
-    asset::RenderAssetUsages,
     color::palettes::css::*,
-    pbr::wireframe::{NoWireframe, WireframeColor, WireframeConfig, WireframePlugin},
+    pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin},
     prelude::*,
     render::{
-        render_resource::{Extent3d, TextureDimension, TextureFormat},
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
         RenderPlugin,
     },
-    state::commands,
 };
 use bevy_flycam::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use mujoco_parser::{Body, MuJoCoFile};
-
-use trees::Tree;
+use mujoco_parser::{Body, Geom, Joint, MuJoCoFile};
 
 fn main() {
     App::new()
@@ -48,7 +43,11 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (spawn_mujoco_model,).run_if(in_state(AppState::Loading)),
+            (
+                spawn_mujoco_model,
+                spawn_mujoco_joints.after(spawn_mujoco_model),
+            )
+                .run_if(in_state(AppState::Loading)),
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()
@@ -104,8 +103,8 @@ enum AppState {
     Simulation,
 }
 
-#[derive(Deref, DerefMut)]
-pub struct BodyTree(pub Tree<Body>);
+#[derive(Component)]
+struct MuJoCoRoot;
 
 #[derive(Resource)]
 struct MuJoCoFileHandle(Handle<MuJoCoFile>);
@@ -118,8 +117,9 @@ fn spawn_mujoco_model(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     images: ResMut<Assets<Image>>,
-    // mujoco: ResMut<MuJoCoSimulation>,
 ) {
+    println!("pass 1");
+
     let mujoco_file = rpy_assets.get(mujoco_handle.0.id());
     if mujoco_file.is_none() {
         return;
@@ -129,7 +129,7 @@ fn spawn_mujoco_model(
 
     // Closure that can call itself recursively
     struct SpawnEntities<'s> {
-        f: &'s dyn Fn(&SpawnEntities, Option<Body>, Body, &mut ChildBuilder, usize),
+        f: &'s dyn Fn(&SpawnEntities, Body, &mut ChildBuilder, usize),
     }
 
     impl SpawnEntities<'_> {
@@ -138,7 +138,6 @@ fn spawn_mujoco_model(
         fn spawn_body(
             &self,
             child_builder: &mut ChildBuilder,
-            parent_body: Option<Body>,
             body: &Body,
             meshes: &Rc<RefCell<ResMut<Assets<Mesh>>>>,
             materials: &Rc<RefCell<ResMut<Assets<StandardMaterial>>>>,
@@ -147,6 +146,7 @@ fn spawn_mujoco_model(
         ) {
             let mut binding: EntityCommands;
             {
+                // let mut commands = commands.borrow_mut();
                 let mut materials = materials.borrow_mut();
                 let mut meshes = meshes.borrow_mut();
                 let mut images = images.borrow_mut();
@@ -156,9 +156,25 @@ fn spawn_mujoco_model(
                 binding = child_builder.spawn((
                     Name::new(format!("MuJoCo::body_{}", body_name.as_str())),
                     body.transform(),
+                    body.clone(),
                 ));
 
                 if let Some(joint) = body.joint.clone() {
+                    binding.insert(joint);
+                }
+
+                if body.joint.is_some() {
+                    let joint = body.clone().joint.unwrap();
+                    binding.insert(joint);
+                } else {
+                    let joint = Joint {
+                        joint_type: "none".to_string(),
+                        pos: (0.0, 0.0, 0.0),
+                        axis: None,
+                        range: None,
+                        name: None,
+                        margin: None,
+                    };
                     binding.insert(joint);
                 }
 
@@ -171,14 +187,17 @@ fn spawn_mujoco_model(
                             "MuJoCo::mesh_{}",
                             body.name.clone().unwrap_or_default().as_str()
                         )),
+                        body.clone().geom,
                     ));
 
-                    if parent_body.is_none() || parent_body.unwrap().joint.is_some() {
+                    if body.joint.is_some() {
                         cmd.insert((
                             RigidBody::Dynamic,
                             body.geom.mass_properties_bundle(),
                             body.geom.collider(),
                         ));
+                    } else {
+                        // insert fixed joint here
                     }
                 });
             }
@@ -193,16 +212,15 @@ fn spawn_mujoco_model(
     let commands = Rc::new(RefCell::new(commands));
 
     let spawn_entities = SpawnEntities {
-        f: &|func, parent_body, body, child_builder, depth| {
+        f: &|func, body, child_builder, depth| {
             let add_children = |child_builder: &mut ChildBuilder| {
                 for child in body.clone().children {
-                    (func.f)(func, Some(body.clone()), child, child_builder, depth + 1);
+                    (func.f)(func, child, child_builder, depth + 1);
                 }
             };
 
             func.spawn_body(
                 child_builder,
-                parent_body.clone(),
                 &body.clone(),
                 &meshes,
                 &materials,
@@ -214,40 +232,27 @@ fn spawn_mujoco_model(
 
     let mut commands = commands.borrow_mut();
     let bodies = mujoco_file.unwrap().0.clone();
-    commands
-        .spawn((Name::new("MuJoCo::world"), Transform::IDENTITY))
-        .with_children(|child_builder| {
-            for body in bodies {
-                (spawn_entities.f)(&spawn_entities, None, body, child_builder, 0);
-            }
-        });
+
+    let mut binding = commands.spawn((Name::new("MuJoCo::world"), Transform::IDENTITY, MuJoCoRoot));
+
+    binding.with_children(|child_builder| {
+        for body in bodies {
+            (spawn_entities.f)(&spawn_entities, body, child_builder, 0);
+        }
+    });
 }
 
-/// Creates a colorful test pattern
-fn uv_debug_texture() -> Image {
-    const TEXTURE_SIZE: usize = 8;
-
-    let mut palette: [u8; 32] = [
-        255, 102, 159, 255, 255, 159, 102, 255, 236, 255, 102, 255, 121, 255, 102, 255, 102, 255,
-        198, 255, 102, 198, 255, 255, 121, 102, 255, 255, 236, 102, 255, 255,
-    ];
-
-    let mut texture_data = [0; TEXTURE_SIZE * TEXTURE_SIZE * 4];
-    for y in 0..TEXTURE_SIZE {
-        let offset = TEXTURE_SIZE * y * 4;
-        texture_data[offset..(offset + TEXTURE_SIZE * 4)].copy_from_slice(&palette);
-        palette.rotate_right(4);
+fn spawn_mujoco_joints(
+    mut commands: Commands,
+    // q_mujoco_root: Query<(Entity, &MuJoCoRoot)>,
+    q_joints: Query<(Entity, &Parent, &Joint)>,
+    q_geoms: Query<(Entity, &Geom)>,
+) {
+    // iterate over joints and inser avian joint
+    for (entity, parent, joint) in q_joints.iter() {
+        // handle "none" joints
+        if joint.joint_type == "none" {
+            println!("handle here");
+        }
     }
-
-    Image::new_fill(
-        Extent3d {
-            width: TEXTURE_SIZE as u32,
-            height: TEXTURE_SIZE as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &texture_data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    )
 }
