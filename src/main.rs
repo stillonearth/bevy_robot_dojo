@@ -110,12 +110,12 @@ struct MuJoCoRoot;
 struct MuJoCoFileHandle(Handle<MuJoCoFile>);
 
 fn spawn_mujoco_model(
-    mut commands: Commands,
+    commands: Commands,
     rpy_assets: Res<Assets<MuJoCoFile>>,
     mujoco_handle: Res<MuJoCoFileHandle>,
     mut app_state: ResMut<NextState<AppState>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     images: ResMut<Assets<Image>>,
 ) {
     println!("pass 1");
@@ -147,9 +147,9 @@ fn spawn_mujoco_model(
             let mut binding: EntityCommands;
             {
                 // let mut commands = commands.borrow_mut();
-                let mut materials = materials.borrow_mut();
+                let materials = materials.borrow_mut();
                 let mut meshes = meshes.borrow_mut();
-                let mut images = images.borrow_mut();
+                let images = images.borrow_mut();
 
                 let body_name = body.name.clone().unwrap_or_default();
 
@@ -181,7 +181,7 @@ fn spawn_mujoco_model(
                 binding.with_children(|children| {
                     let mut cmd = children.spawn((
                         Mesh3d(meshes.add(body.geom.mesh())),
-                        body.geom.transform(),
+                        // body.geom.transform(),
                         WireframeColor { color: LIME.into() },
                         Name::new(format!(
                             "MuJoCo::mesh_{}",
@@ -267,8 +267,9 @@ fn spawn_mujoco_joints(
                 continue;
             }
             let (child_entity, _, _) = child_geom.unwrap();
+
             commands.spawn((
-                FixedJoint::new(parent_entity, child_entity),
+                FixedJoint::new(child_entity, parent_entity),
                 Name::new("Joint"),
             ));
             println!("spawned joint");

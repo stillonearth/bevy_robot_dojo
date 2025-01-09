@@ -1,5 +1,3 @@
-use avian3d::parry::na;
-use avian3d::parry::shape;
 use avian3d::prelude::Collider;
 use avian3d::prelude::MassPropertiesBundle;
 // use anyhow::*;
@@ -196,7 +194,7 @@ fn parse_joint(element: &roxmltree::Node) -> Result<Joint> {
     };
 
     let joint = Joint {
-        name: name,
+        name,
         pos,
         joint_type,
         range,
@@ -218,7 +216,7 @@ fn parse_range(repr: &str) -> Result<(f32, f32)> {
     let from: f32 = coorinates["from"].parse()?;
     let to: f32 = coorinates["to"].parse()?;
 
-    return Ok((from, to));
+    Ok((from, to))
 }
 
 fn parse_3_vec(repr: &str) -> Result<(f32, f32, f32)> {
@@ -234,7 +232,7 @@ fn parse_3_vec(repr: &str) -> Result<(f32, f32, f32)> {
     let y: f32 = coorinates["y"].parse()?;
     let z: f32 = coorinates["z"].parse()?;
 
-    return Ok((x, y, z));
+    Ok((x, y, z))
 }
 
 fn parse_fromto(repr: &str) -> Result<((f32, f32, f32), (f32, f32, f32))> {
@@ -254,7 +252,7 @@ fn parse_fromto(repr: &str) -> Result<((f32, f32, f32), (f32, f32, f32))> {
     let y2: f32 = coorinates["y2"].parse()?;
     let z2: f32 = coorinates["z2"].parse()?;
 
-    return Ok(((x1, y1, z1), (x2, y2, z2)));
+    Ok(((x1, y1, z1), (x2, y2, z2)))
 }
 
 fn parse_body(element: &roxmltree::Node) -> Result<Body> {
@@ -280,7 +278,7 @@ fn parse_body(element: &roxmltree::Node) -> Result<Body> {
         pos,
         geom: parse_geom(&geom_node)?,
         children: parse_parent_node(element)?,
-        joint: joint,
+        joint,
     };
 
     Ok(body)
@@ -340,7 +338,7 @@ pub fn parse_parent_node(node: &roxmltree::Node) -> Result<Vec<Body>> {
 }
 
 pub fn parse_mujoco_config(document: &str) -> Result<Vec<Body>> {
-    let xml_document = roxmltree::Document::parse(&document)?;
+    let xml_document = roxmltree::Document::parse(document)?;
 
     let worldbody_element = xml_document
         .descendants()
