@@ -5,7 +5,7 @@ mod mujoco_parser;
 
 use std::{cell::RefCell, rc::Rc};
 
-use avian3d::prelude::*;
+use avian3d::prelude::{Joint, *};
 use bevy::{
     color::palettes::css::*,
     pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin},
@@ -17,7 +17,7 @@ use bevy::{
 };
 use bevy_flycam::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use mujoco_parser::{Body, Geom, Joint, MuJoCoFile};
+use mujoco_parser::{Body, Geom, MuJoCoFile};
 
 fn main() {
     App::new()
@@ -51,7 +51,7 @@ fn main() {
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()
-        // .add_plugins(NoCameraPlayerPlugin)
+        .add_plugins(NoCameraPlayerPlugin)
         .insert_resource(MovementSettings {
             speed: 2.0,
             ..default()
@@ -92,7 +92,7 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(5., 9., 18.).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
-        // FlyCam,
+        FlyCam,
     ));
 }
 
@@ -167,7 +167,7 @@ fn spawn_mujoco_model(
                     let joint = body.clone().joint.unwrap();
                     binding.insert(joint);
                 } else {
-                    let joint = Joint {
+                    let joint = crate::mujoco_parser::Joint {
                         joint_type: "none".to_string(),
                         pos: (0.0, 0.0, 0.0),
                         axis: None,
@@ -197,7 +197,11 @@ fn spawn_mujoco_model(
                             body.geom.collider(),
                         ));
                     } else {
-                        // insert fixed joint here
+                        cmd.insert((
+                            RigidBody::Dynamic,
+                            body.geom.mass_properties_bundle(),
+                            // body.geom.collider(),
+                        ));
                     }
                 });
             }
@@ -245,7 +249,7 @@ fn spawn_mujoco_model(
 fn spawn_mujoco_joints(
     mut commands: Commands,
     // q_mujoco_root: Query<(Entity, &MuJoCoRoot)>,
-    q_joints: Query<(Entity, &Parent, &Joint)>,
+    q_joints: Query<(Entity, &Parent, &mujoco_parser::Joint)>,
     q_geoms: Query<(Entity, &Parent, &Geom)>,
 ) {
     // iterate over joints and inser avian joint
@@ -258,7 +262,17 @@ fn spawn_mujoco_joints(
                 continue;
             }
             let (parent_entity, _, _) = parent_geom.unwrap();
-            commands.spawn(FixedJoint::new(parent_entity, entity));
+            let child_geom = q_geoms.iter().find(|(_, p2, _)| p2.get() == entity);
+            if parent_geom.is_none() {
+                continue;
+            }
+            let (child_entity, _, _) = child_geom.unwrap();
+            commands.spawn((
+                FixedJoint::new(parent_entity, child_entity),
+                Name::new("Joint"),
+            ));
+            println!("spawned joint");
+            // commands.spawn(FixedJoint::new(parent_entity, entity));
         }
     }
 }
