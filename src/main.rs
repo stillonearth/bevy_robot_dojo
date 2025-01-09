@@ -246,13 +246,19 @@ fn spawn_mujoco_joints(
     mut commands: Commands,
     // q_mujoco_root: Query<(Entity, &MuJoCoRoot)>,
     q_joints: Query<(Entity, &Parent, &Joint)>,
-    q_geoms: Query<(Entity, &Geom)>,
+    q_geoms: Query<(Entity, &Parent, &Geom)>,
 ) {
     // iterate over joints and inser avian joint
-    for (entity, parent, joint) in q_joints.iter() {
+    for (entity, p1, joint) in q_joints.iter() {
         // handle "none" joints
         if joint.joint_type == "none" {
-            println!("handle here");
+            // find upper mesh
+            let parent_geom = q_geoms.iter().find(|(_, p2, _)| p2.get() == p1.get());
+            if parent_geom.is_none() {
+                continue;
+            }
+            let (parent_entity, _, _) = parent_geom.unwrap();
+            commands.spawn(FixedJoint::new(parent_entity, entity));
         }
     }
 }
