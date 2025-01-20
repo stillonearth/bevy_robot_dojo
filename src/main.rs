@@ -91,8 +91,8 @@ fn setup(
     ));
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(5., 9., 18.).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
-        FlyCam,
+        Transform::from_xyz(1.5, 7.5, 3.5).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
+        // FlyCam,
     ));
 }
 
@@ -109,6 +109,9 @@ struct MuJoCoRoot;
 #[derive(Resource)]
 struct MuJoCoFileHandle(Handle<MuJoCoFile>);
 
+#[derive(Component)]
+struct GeomWrapper;
+
 fn spawn_mujoco_model(
     commands: Commands,
     rpy_assets: Res<Assets<MuJoCoFile>>,
@@ -118,8 +121,6 @@ fn spawn_mujoco_model(
     materials: ResMut<Assets<StandardMaterial>>,
     images: ResMut<Assets<Image>>,
 ) {
-    println!("pass 1");
-
     let mujoco_file = rpy_assets.get(mujoco_handle.0.id());
     if mujoco_file.is_none() {
         return;
@@ -143,8 +144,13 @@ fn spawn_mujoco_model(
             materials: &Rc<RefCell<ResMut<Assets<StandardMaterial>>>>,
             images: &Rc<RefCell<ResMut<Assets<Image>>>>,
             add_children: impl FnOnce(&mut ChildBuilder),
+            depth: usize,
         ) {
-            let mut binding: EntityCommands;
+            if depth == 2 {
+                return;
+            }
+
+            let mut binding_1: EntityCommands;
             {
                 // let mut commands = commands.borrow_mut();
                 let materials = materials.borrow_mut();
@@ -153,19 +159,19 @@ fn spawn_mujoco_model(
 
                 let body_name = body.name.clone().unwrap_or_default();
 
-                binding = child_builder.spawn((
+                binding_1 = child_builder.spawn((
                     Name::new(format!("MuJoCo::body_{}", body_name.as_str())),
                     body.transform(),
                     body.clone(),
                 ));
 
                 if let Some(joint) = body.joint.clone() {
-                    binding.insert(joint);
+                    binding_1.insert(joint);
                 }
 
                 if body.joint.is_some() {
                     let joint = body.clone().joint.unwrap();
-                    binding.insert(joint);
+                    binding_1.insert(joint);
                 } else {
                     let joint = crate::mujoco_parser::Joint {
                         joint_type: "none".to_string(),
@@ -175,13 +181,15 @@ fn spawn_mujoco_model(
                         name: None,
                         margin: None,
                     };
-                    binding.insert(joint);
+                    binding_1.insert(joint);
                 }
 
-                binding.with_children(|children| {
+                // bind
+
+                binding_1.with_children(|children| {
                     let mut cmd = children.spawn((
                         Mesh3d(meshes.add(body.geom.mesh())),
-                        // body.geom.transform(),
+                        body.geom.transform(),
                         WireframeColor { color: LIME.into() },
                         Name::new(format!(
                             "MuJoCo::mesh_{}",
@@ -192,13 +200,13 @@ fn spawn_mujoco_model(
 
                     if body.joint.is_some() {
                         cmd.insert((
-                            RigidBody::Dynamic,
+                            // RigidBody::Dynamic,
                             body.geom.mass_properties_bundle(),
-                            body.geom.collider(),
+                            // body.geom.collider(),
                         ));
                     } else {
                         cmd.insert((
-                            RigidBody::Dynamic,
+                            // RigidBody::Dynamic,
                             body.geom.mass_properties_bundle(),
                             // body.geom.collider(),
                         ));
@@ -206,7 +214,7 @@ fn spawn_mujoco_model(
                 });
             }
 
-            binding.with_children(add_children);
+            binding_1.with_children(add_children);
         }
     }
 
@@ -230,6 +238,7 @@ fn spawn_mujoco_model(
                 &materials,
                 &images,
                 add_children,
+                depth,
             );
         },
     };
@@ -273,7 +282,7 @@ fn spawn_mujoco_joints(
                 Name::new("Joint"),
             ));
             println!("spawned joint");
-            // commands.spawn(FixedJoint::new(parent_entity, entity));
+            commands.spawn(FixedJoint::new(parent_entity, entity));
         }
     }
 }

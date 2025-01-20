@@ -78,7 +78,7 @@ impl Geom {
 
         match self.geom_type.as_str() {
             "sphere" => Shape::Sphere {
-                object: Sphere { radius: size * 2.0 },
+                object: Sphere { radius: size },
             },
             "capsule" => {
                 if self.from.is_none() && self.to.is_none() {
