@@ -51,7 +51,7 @@ fn main() {
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()
-        .add_plugins(NoCameraPlayerPlugin)
+        // .add_plugins(NoCameraPlayerPlugin)
         .insert_resource(MovementSettings {
             speed: 2.0,
             ..default()
@@ -153,9 +153,9 @@ fn spawn_mujoco_model(
             let mut binding_1: EntityCommands;
             {
                 // let mut commands = commands.borrow_mut();
-                let materials = materials.borrow_mut();
+                let _materials = materials.borrow_mut();
                 let mut meshes = meshes.borrow_mut();
-                let images = images.borrow_mut();
+                let _images = images.borrow_mut();
 
                 let body_name = body.name.clone().unwrap_or_default();
 
@@ -184,33 +184,40 @@ fn spawn_mujoco_model(
                     binding_1.insert(joint);
                 }
 
-                // bind
-
                 binding_1.with_children(|children| {
-                    let mut cmd = children.spawn((
-                        Mesh3d(meshes.add(body.geom.mesh())),
-                        body.geom.transform(),
-                        WireframeColor { color: LIME.into() },
-                        Name::new(format!(
-                            "MuJoCo::mesh_{}",
-                            body.name.clone().unwrap_or_default().as_str()
-                        )),
-                        body.clone().geom,
+                    let mut binding_2 = children.spawn((
+                        // body.geom.transform(),
+                        RigidBody::Dynamic,
+                        GeomWrapper {},
+                        Name::new("Geom Wrapper"),
                     ));
 
-                    if body.joint.is_some() {
-                        cmd.insert((
-                            // RigidBody::Dynamic,
-                            body.geom.mass_properties_bundle(),
-                            // body.geom.collider(),
+                    binding_2.with_children(|children| {
+                        let mut cmd = children.spawn((
+                            Mesh3d(meshes.add(body.geom.mesh())),
+                            body.geom.transform(),
+                            WireframeColor { color: LIME.into() },
+                            Name::new(format!(
+                                "MuJoCo::mesh_{}",
+                                body.name.clone().unwrap_or_default().as_str()
+                            )),
+                            body.clone().geom,
                         ));
-                    } else {
-                        cmd.insert((
-                            // RigidBody::Dynamic,
-                            body.geom.mass_properties_bundle(),
-                            // body.geom.collider(),
-                        ));
-                    }
+
+                        if body.joint.is_some() {
+                            cmd.insert((
+                                RigidBody::Dynamic,
+                                body.geom.mass_properties_bundle(),
+                                body.geom.collider(),
+                            ));
+                        } else {
+                            cmd.insert((
+                                // RigidBody::Dynamic,
+                                body.geom.mass_properties_bundle(),
+                                // body.geom.collider(),
+                            ));
+                        }
+                    });
                 });
             }
 
@@ -260,29 +267,42 @@ fn spawn_mujoco_joints(
     // q_mujoco_root: Query<(Entity, &MuJoCoRoot)>,
     q_joints: Query<(Entity, &Parent, &mujoco_parser::Joint)>,
     q_geoms: Query<(Entity, &Parent, &Geom)>,
+    q_geom_wrappers: Query<(Entity, &Parent, &GeomWrapper)>,
 ) {
     // iterate over joints and inser avian joint
-    for (entity, p1, joint) in q_joints.iter() {
+    for (entity, joint_parent, joint) in q_joints.iter() {
         // handle "none" joints
         if joint.joint_type == "none" {
             // find upper mesh
-            let parent_geom = q_geoms.iter().find(|(_, p2, _)| p2.get() == p1.get());
-            if parent_geom.is_none() {
+            let parent_geom_wrapper = q_geom_wrappers
+                .iter()
+                .find(|(_, p2, _)| p2.get() == joint_parent.get());
+
+            // println!("here 0");
+
+            if parent_geom_wrapper.is_none() {
                 continue;
             }
-            let (parent_entity, _, _) = parent_geom.unwrap();
-            let child_geom = q_geoms.iter().find(|(_, p2, _)| p2.get() == entity);
-            if parent_geom.is_none() {
+
+            let (parent_geom_wrapper, _, _) = parent_geom_wrapper.unwrap();
+            println!("parent geom wrapper: {}", parent_geom_wrapper);
+            let parent_geom = q_geoms
+                .iter()
+                .find(|(_, p, _)| p.get() == parent_geom_wrapper);
+            let (parent_geom, _, _) = parent_geom.unwrap();
+
+            let child_geom_wrapper = q_geom_wrappers.iter().find(|(_, p1, _)| p1.get() == entity);
+            if child_geom_wrapper.is_none() {
                 continue;
             }
-            let (child_entity, _, _) = child_geom.unwrap();
+            let (child_geom_wrapper, _, _) = child_geom_wrapper.unwrap();
+
+            println!("child geom wrapper: {}", child_geom_wrapper);
 
             commands.spawn((
-                FixedJoint::new(child_entity, parent_entity),
+                FixedJoint::new(parent_geom, child_geom_wrapper),
                 Name::new("Joint"),
             ));
-            println!("spawned joint");
-            commands.spawn(FixedJoint::new(parent_entity, entity));
         }
     }
 }
