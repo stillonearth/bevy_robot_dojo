@@ -1,14 +1,17 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 #![feature(let_chains)]
 
-mod mujoco_parser;
+mod mujoco_plugin;
+mod mujoco_xml_parser;
+mod physics;
 
-use std::{cell::RefCell, rc::Rc};
-
-use avian3d::prelude::{Joint, *};
+use avian3d::{
+    prelude::{Collider, RigidBody},
+    PhysicsPlugins,
+};
 use bevy::{
     color::palettes::css::*,
-    pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin},
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
     render::{
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
@@ -17,7 +20,9 @@ use bevy::{
 };
 use bevy_flycam::*;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use mujoco_parser::{Body, Geom, MuJoCoFile};
+
+use crate::mujoco_plugin::*;
+use crate::mujoco_xml_parser::*;
 
 fn main() {
     App::new()
@@ -38,9 +43,12 @@ fn main() {
             default_color: WHITE.into(),
         })
         // .insert_resource(SubstepCount(50))
-        .init_asset::<mujoco_parser::MuJoCoFile>()
-        .init_asset_loader::<mujoco_parser::MuJoCoFileLoader>()
-        .add_systems(Startup, setup)
+        .init_asset::<mujoco_xml_parser::MuJoCoFile>()
+        .init_asset_loader::<mujoco_xml_parser::MuJoCoFileLoader>()
+        .add_systems(
+            Startup,
+            (setup_scene, setup_mujoco_robot.after(setup_scene)),
+        )
         .add_systems(
             Update,
             (
@@ -51,7 +59,7 @@ fn main() {
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()
-        // .add_plugins(NoCameraPlayerPlugin)
+        .add_plugins(NoCameraPlayerPlugin)
         .insert_resource(MovementSettings {
             speed: 2.0,
             ..default()
@@ -59,15 +67,11 @@ fn main() {
         .run();
 }
 
-fn setup(
+fn setup_scene(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mujoco_handle: Handle<MuJoCoFile> = asset_server.load("ant.xml");
-    commands.insert_resource(MuJoCoFileHandle(mujoco_handle));
-
     // light
     commands.spawn((
         PointLight {
@@ -92,8 +96,13 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(1.5, 7.5, 3.5).looking_at(Vec3::new(0., 0., 0.), Vec3::Y),
-        // FlyCam,
+        FlyCam,
     ));
+}
+
+fn setup_mujoco_robot(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let mujoco_handle: Handle<MuJoCoFile> = asset_server.load("ant.xml");
+    commands.insert_resource(mujoco_plugin::MuJoCoFileHandle(mujoco_handle));
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
@@ -101,208 +110,4 @@ enum AppState {
     #[default]
     Loading,
     Simulation,
-}
-
-#[derive(Component)]
-struct MuJoCoRoot;
-
-#[derive(Resource)]
-struct MuJoCoFileHandle(Handle<MuJoCoFile>);
-
-#[derive(Component)]
-struct GeomWrapper;
-
-fn spawn_mujoco_model(
-    commands: Commands,
-    rpy_assets: Res<Assets<MuJoCoFile>>,
-    mujoco_handle: Res<MuJoCoFileHandle>,
-    mut app_state: ResMut<NextState<AppState>>,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
-    images: ResMut<Assets<Image>>,
-) {
-    let mujoco_file = rpy_assets.get(mujoco_handle.0.id());
-    if mujoco_file.is_none() {
-        return;
-    }
-
-    app_state.set(AppState::Simulation);
-
-    // Closure that can call itself recursively
-    struct SpawnEntities<'s> {
-        f: &'s dyn Fn(&SpawnEntities, Body, &mut ChildBuilder, usize),
-    }
-
-    impl SpawnEntities<'_> {
-        /// Spawn a bevy entity for MuJoCo body
-        #[allow(clippy::too_many_arguments)]
-        fn spawn_body(
-            &self,
-            child_builder: &mut ChildBuilder,
-            body: &Body,
-            meshes: &Rc<RefCell<ResMut<Assets<Mesh>>>>,
-            materials: &Rc<RefCell<ResMut<Assets<StandardMaterial>>>>,
-            images: &Rc<RefCell<ResMut<Assets<Image>>>>,
-            add_children: impl FnOnce(&mut ChildBuilder),
-            depth: usize,
-        ) {
-            if depth == 2 {
-                return;
-            }
-
-            let mut binding_1: EntityCommands;
-            {
-                // let mut commands = commands.borrow_mut();
-                let _materials = materials.borrow_mut();
-                let mut meshes = meshes.borrow_mut();
-                let _images = images.borrow_mut();
-
-                let body_name = body.name.clone().unwrap_or_default();
-
-                binding_1 = child_builder.spawn((
-                    Name::new(format!("MuJoCo::body_{}", body_name.as_str())),
-                    body.transform(),
-                    body.clone(),
-                ));
-
-                if let Some(joint) = body.joint.clone() {
-                    binding_1.insert(joint);
-                }
-
-                if body.joint.is_some() {
-                    let joint = body.clone().joint.unwrap();
-                    binding_1.insert(joint);
-                } else {
-                    let joint = crate::mujoco_parser::Joint {
-                        joint_type: "none".to_string(),
-                        pos: (0.0, 0.0, 0.0),
-                        axis: None,
-                        range: None,
-                        name: None,
-                        margin: None,
-                    };
-                    binding_1.insert(joint);
-                }
-
-                binding_1.with_children(|children| {
-                    let mut binding_2 = children.spawn((
-                        // body.geom.transform(),
-                        RigidBody::Dynamic,
-                        GeomWrapper {},
-                        Name::new("Geom Wrapper"),
-                    ));
-
-                    binding_2.with_children(|children| {
-                        let mut cmd = children.spawn((
-                            Mesh3d(meshes.add(body.geom.mesh())),
-                            body.geom.transform(),
-                            WireframeColor { color: LIME.into() },
-                            Name::new(format!(
-                                "MuJoCo::mesh_{}",
-                                body.name.clone().unwrap_or_default().as_str()
-                            )),
-                            body.clone().geom,
-                        ));
-
-                        if body.joint.is_some() {
-                            cmd.insert((
-                                RigidBody::Dynamic,
-                                body.geom.mass_properties_bundle(),
-                                body.geom.collider(),
-                            ));
-                        } else {
-                            cmd.insert((
-                                // RigidBody::Dynamic,
-                                body.geom.mass_properties_bundle(),
-                                // body.geom.collider(),
-                            ));
-                        }
-                    });
-                });
-            }
-
-            binding_1.with_children(add_children);
-        }
-    }
-
-    let meshes = Rc::new(RefCell::new(meshes));
-    let materials = Rc::new(RefCell::new(materials));
-    let images = Rc::new(RefCell::new(images));
-    let commands = Rc::new(RefCell::new(commands));
-
-    let spawn_entities = SpawnEntities {
-        f: &|func, body, child_builder, depth| {
-            let add_children = |child_builder: &mut ChildBuilder| {
-                for child in body.clone().children {
-                    (func.f)(func, child, child_builder, depth + 1);
-                }
-            };
-
-            func.spawn_body(
-                child_builder,
-                &body.clone(),
-                &meshes,
-                &materials,
-                &images,
-                add_children,
-                depth,
-            );
-        },
-    };
-
-    let mut commands = commands.borrow_mut();
-    let bodies = mujoco_file.unwrap().0.clone();
-
-    let mut binding = commands.spawn((Name::new("MuJoCo::world"), Transform::IDENTITY, MuJoCoRoot));
-
-    binding.with_children(|child_builder| {
-        for body in bodies {
-            (spawn_entities.f)(&spawn_entities, body, child_builder, 0);
-        }
-    });
-}
-
-fn spawn_mujoco_joints(
-    mut commands: Commands,
-    // q_mujoco_root: Query<(Entity, &MuJoCoRoot)>,
-    q_joints: Query<(Entity, &Parent, &mujoco_parser::Joint)>,
-    q_geoms: Query<(Entity, &Parent, &Geom)>,
-    q_geom_wrappers: Query<(Entity, &Parent, &GeomWrapper)>,
-) {
-    // iterate over joints and inser avian joint
-    for (entity, joint_parent, joint) in q_joints.iter() {
-        // handle "none" joints
-        if joint.joint_type == "none" {
-            // find upper mesh
-            let parent_geom_wrapper = q_geom_wrappers
-                .iter()
-                .find(|(_, p2, _)| p2.get() == joint_parent.get());
-
-            // println!("here 0");
-
-            if parent_geom_wrapper.is_none() {
-                continue;
-            }
-
-            let (parent_geom_wrapper, _, _) = parent_geom_wrapper.unwrap();
-            println!("parent geom wrapper: {}", parent_geom_wrapper);
-            let parent_geom = q_geoms
-                .iter()
-                .find(|(_, p, _)| p.get() == parent_geom_wrapper);
-            let (parent_geom, _, _) = parent_geom.unwrap();
-
-            let child_geom_wrapper = q_geom_wrappers.iter().find(|(_, p1, _)| p1.get() == entity);
-            if child_geom_wrapper.is_none() {
-                continue;
-            }
-            let (child_geom_wrapper, _, _) = child_geom_wrapper.unwrap();
-
-            println!("child geom wrapper: {}", child_geom_wrapper);
-
-            commands.spawn((
-                FixedJoint::new(parent_geom, child_geom_wrapper),
-                Name::new("Joint"),
-            ));
-        }
-    }
 }
