@@ -4,6 +4,7 @@
 mod mujoco_plugin;
 mod mujoco_xml_parser;
 mod physics;
+mod stub_ant_robot;
 
 use avian3d::{
     prelude::{Collider, RigidBody},
@@ -23,6 +24,7 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 use crate::mujoco_plugin::*;
 use crate::mujoco_xml_parser::*;
+use crate::stub_ant_robot::spawn_stub_model;
 
 fn main() {
     App::new()
@@ -49,13 +51,19 @@ fn main() {
             Startup,
             (setup_scene, setup_mujoco_robot.after(setup_scene)),
         )
+        // MuJoCo path -- currently WIP
+        // .add_systems(
+        //     Update,
+        //     (
+        //         spawn_mujoco_model,
+        //         spawn_mujoco_joints.after(spawn_mujoco_model),
+        //     )
+        //         .run_if(in_state(AppState::Loading)),
+        // )
+        // Stub Ant Robot
         .add_systems(
             Update,
-            (
-                spawn_mujoco_model,
-                spawn_mujoco_joints.after(spawn_mujoco_model),
-            )
-                .run_if(in_state(AppState::Loading)),
+            (spawn_stub_model).run_if(in_state(AppState::Loading)),
         )
         // .add_systems(Update, ().run_if(in_state(AppState::Simulation)))
         .init_state::<AppState>()

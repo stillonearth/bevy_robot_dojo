@@ -378,7 +378,6 @@ impl AssetLoader for MuJoCoFileLoader {
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
-        info!("Loading XML...");
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let content = std::str::from_utf8(&bytes).unwrap();
