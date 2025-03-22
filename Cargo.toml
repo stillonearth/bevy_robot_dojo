@@ -5,18 +5,14 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.95"
-avian3d = "0.2"
 bevy = { version = "0.15", features = ["jpeg", "png"] }
-bevy_common_assets = "0.12.0"
-bevy-inspector-egui = "0.28"
-lazy_static = "1.5.0"
-rand = "0.8.5"
-regex = "1.11.1"
-roxmltree = "0.20.0"
+bevy_urdf = {path = "../bevy_urdf" }
+bevy_flycam = "0.15.0"
+bevy-inspector-egui = "0.30"
+bevy_rapier3d = { version = "0.29", features = [ "simd-stable", "debug-render-3d" ] }
+rand = "0.9"
+bevy_stl = "0.15"
+bevy_rl = "0.15.0"
 serde = "1.0"
 serde_derive = "1.0"
-serde_json = "1.0.134"
-thiserror = "2.0.9"
-trees = "0.4.1"
-bevy_flycam = "0.15"
+serde_json = "1.0"
