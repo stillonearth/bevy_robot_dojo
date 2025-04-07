@@ -53,12 +53,12 @@ fn handle_reset_event(
     q_urdf_robots: Query<(Entity, &URDFRobot)>,
     mut dojo_data: ResMut<RobotDojoData>,
     mut ew_spawn_robot: EventWriter<SpawnRobot>,
+    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
 ) {
     for _ in er_reset.read() {
         // if let Some(robot_handle) = robot_handle.0.clone() {
         //     for (entity, _) in q_urdf_robots.iter() {
         //         commands.entity(entity).despawn_descendants();
-
         //         ew_spawn_robot.send(SpawnRobot {
         //             handle: robot_handle.clone(),
         //             mesh_dir: String::from(MESH_DIR).replace("assets/", ""),
@@ -79,14 +79,25 @@ fn sync_bevy_rl_and_rapier(
     mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
 ) {
     for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
-        if !rapier_configuration.physics_pipeline_active {
-            return;
-        }
         rapier_configuration.physics_pipeline_active = match **bevy_rl_state {
             SimulationState::Initializing => false,
             SimulationState::Running => true,
             SimulationState::PausedForControl => false,
         };
+    }
+}
+
+fn handle_robot_spawned(
+    mut er_spawned: EventReader<RobotSpawned>,
+    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
+    mut dojo_data: ResMut<RobotDojoData>,
+) {
+    for _ in er_spawned.read() {
+        if dojo_data.reset_request {
+            let ai_gym_state = ai_gym_state.lock().unwrap();
+            ai_gym_state.send_reset_result(true);
+            dojo_data.reset_request = false;
+        }
     }
 }
 
@@ -137,6 +148,7 @@ fn handle_control_request(
     dojo_data: Res<RobotDojoData>,
 ) {
     for control in er_control.read() {
+        println!("control request");
         for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
             rapier_configuration.physics_pipeline_active = true;
             let raw_actions = control.0.clone();
