@@ -4,12 +4,12 @@ import json
 
 import gymnasium as gym
 
-API_STEP = "http://127.0.0.1:7879/step"
-API_STATE = "http://127.0.0.1:7879/state"
-API_RESET = "http://127.0.0.1:7879/reset"
+API_STEP = "http://127.0.0.1:7878/step"
+API_STATE = "http://127.0.0.1:7878/state"
+API_RESET = "http://127.0.0.1:7878/reset"
 
 OBSERVATION_SIZE = 69
-ACTION_SIZE = 16
+ACTION_SIZE = 10
 
 
 class BevyRLEnv(gym.Env):
@@ -35,14 +35,11 @@ class BevyRLEnv(gym.Env):
         return requests.get(API_STEP, params={"payload": payload}).json()
 
     def step(self, action):
-        print("env.step start", action)
+        print("do step ", action)
         obs = self.get_obs()
         step_data = self.step_env(action)[0]
-        print("env.step end")
         is_terminated = step_data["is_terminated"]
         reward = step_data["reward"]
-
-        
 
         return obs, reward, is_terminated, False, {}
 
@@ -50,11 +47,7 @@ class BevyRLEnv(gym.Env):
         requests.get(API_RESET)
 
     def reset(self, seed):
-        print("env.reset start")
         self.reset_env()
-
-        print("env.reset end ")
-
         return self.get_obs(), {}
 
     def render():
