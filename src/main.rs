@@ -140,7 +140,6 @@ fn handle_pause_event(
 
 #[allow(unused_must_use)]
 fn handle_control_request(
-    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
     mut er_control: EventReader<EventControl>,
     mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
     mut simulation_state: ResMut<NextState<SimulationState>>,
@@ -148,7 +147,6 @@ fn handle_control_request(
     dojo_data: Res<RobotDojoData>,
 ) {
     for control in er_control.read() {
-        println!("control request");
         for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
             rapier_configuration.physics_pipeline_active = true;
             let raw_actions = control.0.clone();
