@@ -55,16 +55,9 @@ fn handle_reset_event(
     mut ew_spawn_robot: EventWriter<SpawnRobot>,
 ) {
     for _ in er_reset.read() {
-<<<<<<< HEAD
         // if let Some(robot_handle) = robot_handle.0.clone() {
         //     for (entity, _) in q_urdf_robots.iter() {
         //         commands.entity(entity).despawn_descendants();
-=======
-        if let Some(robot_handle) = dojo_data.urdf_handle.clone() {
-            for (entity, _) in q_urdf_robots.iter() {
-                commands.entity(entity).despawn_recursive();
-            }
->>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
 
         //         ew_spawn_robot.send(SpawnRobot {
         //             handle: robot_handle.clone(),
@@ -74,7 +67,6 @@ fn handle_reset_event(
         //     }
         // }
 
-<<<<<<< HEAD
         // TODO: Remove despawned robot entities from rapier context
 
         let ai_gym_state = ai_gym_state.lock().unwrap();
@@ -89,23 +81,6 @@ fn sync_bevy_rl_and_rapier(
     for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
         if !rapier_configuration.physics_pipeline_active {
             return;
-=======
-            dojo_data.reset_request = true;
-        }
-    }
-}
-
-fn handle_robot_spawned(
-    mut er_spawned: EventReader<RobotSpawned>,
-    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
-    mut dojo_data: ResMut<RobotDojoData>,
-) {
-    for _ in er_spawned.read() {
-        if dojo_data.reset_request {
-            let ai_gym_state = ai_gym_state.lock().unwrap();
-            ai_gym_state.send_reset_result(true);
-            dojo_data.reset_request = false;
->>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
         }
         rapier_configuration.physics_pipeline_active = match **bevy_rl_state {
             SimulationState::Initializing => false,
