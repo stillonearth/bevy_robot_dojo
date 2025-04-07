@@ -137,7 +137,6 @@ fn handle_control_request(
     dojo_data: Res<RobotDojoData>,
 ) {
     for control in er_control.read() {
-        println!("control request");
         for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
             rapier_configuration.physics_pipeline_active = true;
             let raw_actions = control.0.clone();
@@ -262,11 +261,7 @@ fn main() {
             AIGymSettings {
                 num_agents: 1,
                 render_to_buffer: false,
-<<<<<<< HEAD
                 pause_interval: 0.01,
-=======
-                pause_interval: 0.1,
->>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
                 ..default()
             },
         ))
