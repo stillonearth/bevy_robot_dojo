@@ -53,20 +53,38 @@ fn handle_reset_event(
     ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
 ) {
     for _ in er_reset.read() {
-        if let Some(robot_handle) = robot_handle.0.clone() {
-            for (entity, _) in q_urdf_robots.iter() {
-                commands.entity(entity).despawn_recursive();
-            }
+        // if let Some(robot_handle) = robot_handle.0.clone() {
+        //     for (entity, _) in q_urdf_robots.iter() {
+        //         commands.entity(entity).despawn_descendants();
 
-            ew_spawn_robot.send(SpawnRobot {
-                handle: robot_handle.clone(),
-                mesh_dir: String::from(MESH_DIR).replace("assets/", ""),
-                parent_entity: None,
-            });
+        //         ew_spawn_robot.send(SpawnRobot {
+        //             handle: robot_handle.clone(),
+        //             mesh_dir: String::from(MESH_DIR).replace("assets/", ""),
+        //             parent_entity: Some(entity),
+        //         });
+        //     }
+        // }
 
-            let ai_gym_state = ai_gym_state.lock().unwrap();
-            ai_gym_state.send_reset_result(true);
+        // TODO: Remove despawned robot entities from rapier context
+
+        let ai_gym_state = ai_gym_state.lock().unwrap();
+        ai_gym_state.send_reset_result(true);
+    }
+}
+
+fn sync_bevy_rl_and_rapier(
+    bevy_rl_state: Res<State<SimulationState>>,
+    mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
+) {
+    for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
+        if !rapier_configuration.physics_pipeline_active {
+            return;
         }
+        rapier_configuration.physics_pipeline_active = match **bevy_rl_state {
+            SimulationState::Initializing => false,
+            SimulationState::Running => true,
+            SimulationState::PausedForControl => false,
+        };
     }
 }
 
@@ -75,38 +93,41 @@ fn handle_pause_event(
     mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
     ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
     last_sensors_readings: Res<LastSensorReading>,
-    mut simulation_state: ResMut<NextState<SimulationState>>,
+    // mut simulation_state: ResMut<NextState<SimulationState>>,
     q_urdf_robots: Query<(Entity, &Transform, &URDFRobot)>,
     mut simulation_data: ResMut<SimulationData>,
 ) {
     for _ in er_pause.read() {
         if let Some(state) = last_sensors_readings.0.clone() {
             for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
-                if !rapier_configuration.physics_pipeline_active {
-                    return;
-                }
                 rapier_configuration.physics_pipeline_active = false;
-                simulation_state.set(SimulationState::PausedForControl);
-
-                // Set bevy_rl gym state
-                let mut ai_gym_state = ai_gym_state.lock().unwrap();
-                ai_gym_state.set_env_state(state.clone());
-
-                for (i, (_, transform, _)) in q_urdf_robots.iter().enumerate() {
-                    let previous_translation = simulation_data.previous_translation;
-                    let current_translation = transform.translation;
-
-                    let distance = current_translation.distance(previous_translation);
-                    ai_gym_state.set_reward(i, distance);
-                    simulation_data.previous_translation = current_translation.clone();
-                }
             }
+            // simulation_state.set(SimulationState::PausedForControl);
+
+            let mut ai_gym_state = ai_gym_state.lock().unwrap();
+            ai_gym_state.set_env_state(state.clone());
+
+            for (i, (_, transform, _)) in q_urdf_robots.iter().enumerate() {
+                let previous_translation = simulation_data.previous_translation;
+                let current_translation = transform.translation;
+
+                let distance = current_translation.distance(previous_translation);
+                ai_gym_state.set_reward(i, distance);
+                simulation_data.previous_translation = current_translation.clone();
+                break;
+            }
+        }
+
+        {
+            let ai_gym_state = ai_gym_state.lock().unwrap();
+            ai_gym_state.send_step_result(vec![true]);
         }
     }
 }
 
 #[allow(unused_must_use)]
 fn handle_control_request(
+    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
     mut er_control: EventReader<EventControl>,
     mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
     mut simulation_state: ResMut<NextState<SimulationState>>,
@@ -127,13 +148,14 @@ fn handle_control_request(
                             handle: robot_handle,
                             velocities: velocities,
                         });
+
                         break;
                     }
                 }
             }
-
-            simulation_state.set(SimulationState::Running);
         }
+
+        simulation_state.set(SimulationState::Running);
     }
 }
 
@@ -197,7 +219,7 @@ fn setup_scene(
 
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 8.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(7.0, 7.0, 7.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         // FlyCam,
@@ -235,7 +257,7 @@ fn main() {
             AIGymSettings {
                 num_agents: 1,
                 render_to_buffer: false,
-                pause_interval: 0.05,
+                pause_interval: 0.01,
                 ..default()
             },
         ))
@@ -273,5 +295,6 @@ fn main() {
             )
                 .run_if(in_state(AppState::Simulation)),
         )
+        .add_systems(Update, sync_bevy_rl_and_rapier)
         .run();
 }
