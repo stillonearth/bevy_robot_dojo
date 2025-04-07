@@ -8,7 +8,7 @@ use bevy_rl::*;
 use bevy_stl::StlPlugin;
 use serde::{Deserialize, Serialize};
 
-use bevy_urdf::events::{ControlMotors, LoadRobot, RobotLoaded, URDFRobot};
+use bevy_urdf::events::{ControlMotors, LoadRobot, RobotLoaded, RobotSpawned, URDFRobot};
 use bevy_urdf::events::{SensorsRead, SpawnRobot};
 use bevy_urdf::plugin::UrdfPlugin;
 use bevy_urdf::urdf_asset_loader::UrdfAsset;
@@ -21,7 +21,10 @@ const MESH_DIR: &str = "assets/robots/flamingo_edu/urdf";
 // bevy_urdf resources
 
 #[derive(Resource)]
-struct UrdfRobotHandle(Option<Handle<UrdfAsset>>);
+struct RobotDojoData {
+    urdf_handle: Option<Handle<UrdfAsset>>,
+    reset_request: bool,
+}
 
 #[derive(Resource)]
 struct LastSensorReading(Option<EnvironmentState>);
@@ -48,14 +51,20 @@ fn handle_reset_event(
     mut commands: Commands,
     mut er_reset: EventReader<EventReset>,
     q_urdf_robots: Query<(Entity, &URDFRobot)>,
-    robot_handle: Res<UrdfRobotHandle>,
+    mut dojo_data: ResMut<RobotDojoData>,
     mut ew_spawn_robot: EventWriter<SpawnRobot>,
-    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
 ) {
     for _ in er_reset.read() {
+<<<<<<< HEAD
         // if let Some(robot_handle) = robot_handle.0.clone() {
         //     for (entity, _) in q_urdf_robots.iter() {
         //         commands.entity(entity).despawn_descendants();
+=======
+        if let Some(robot_handle) = dojo_data.urdf_handle.clone() {
+            for (entity, _) in q_urdf_robots.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+>>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
 
         //         ew_spawn_robot.send(SpawnRobot {
         //             handle: robot_handle.clone(),
@@ -65,6 +74,7 @@ fn handle_reset_event(
         //     }
         // }
 
+<<<<<<< HEAD
         // TODO: Remove despawned robot entities from rapier context
 
         let ai_gym_state = ai_gym_state.lock().unwrap();
@@ -79,6 +89,23 @@ fn sync_bevy_rl_and_rapier(
     for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
         if !rapier_configuration.physics_pipeline_active {
             return;
+=======
+            dojo_data.reset_request = true;
+        }
+    }
+}
+
+fn handle_robot_spawned(
+    mut er_spawned: EventReader<RobotSpawned>,
+    ai_gym_state: Res<AIGymState<Actions, EnvironmentState>>,
+    mut dojo_data: ResMut<RobotDojoData>,
+) {
+    for _ in er_spawned.read() {
+        if dojo_data.reset_request {
+            let ai_gym_state = ai_gym_state.lock().unwrap();
+            ai_gym_state.send_reset_result(true);
+            dojo_data.reset_request = false;
+>>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
         }
         rapier_configuration.physics_pipeline_active = match **bevy_rl_state {
             SimulationState::Initializing => false,
@@ -132,18 +159,18 @@ fn handle_control_request(
     mut q_rapier_context_simulation: Query<(&mut RapierConfiguration)>,
     mut simulation_state: ResMut<NextState<SimulationState>>,
     mut ew_control_motors: EventWriter<ControlMotors>,
-    robot_handle: Res<UrdfRobotHandle>,
+    dojo_data: Res<RobotDojoData>,
 ) {
     for control in er_control.read() {
+        println!("control request");
         for mut rapier_configuration in q_rapier_context_simulation.iter_mut() {
             rapier_configuration.physics_pipeline_active = true;
             let raw_actions = control.0.clone();
 
-            if let Some(robot_handle) = robot_handle.0.clone() {
+            if let Some(robot_handle) = dojo_data.urdf_handle.clone() {
                 for i in 0..raw_actions.len() {
                     if let Some(unparsed_action) = raw_actions[i].clone() {
                         let velocities: Vec<f32> = serde_json::from_str(&unparsed_action).unwrap();
-                        // println!("velocities: {:?}", velocities);
                         ew_control_motors.send(ControlMotors {
                             handle: robot_handle,
                             velocities: velocities,
@@ -184,7 +211,7 @@ fn handle_sensors_read(mut commands: Commands, mut er_read_sensors: EventReader<
     }
 }
 
-fn start_simulation(
+fn handle_robot_loaded(
     mut commands: Commands,
     mut er_robot_loaded: EventReader<RobotLoaded>,
     mut ew_spawn_robot: EventWriter<SpawnRobot>,
@@ -199,7 +226,10 @@ fn start_simulation(
         });
         state.set(AppState::Simulation);
         simulation_state.set(SimulationState::Running);
-        commands.insert_resource(UrdfRobotHandle(Some(event.handle.clone())));
+        commands.insert_resource(RobotDojoData {
+            urdf_handle: Some(event.handle.clone()),
+            reset_request: false,
+        });
     }
 }
 
@@ -257,7 +287,11 @@ fn main() {
             AIGymSettings {
                 num_agents: 1,
                 render_to_buffer: false,
+<<<<<<< HEAD
                 pause_interval: 0.01,
+=======
+                pause_interval: 0.1,
+>>>>>>> 92525daeb10481d6f29129f4abf8b3b9314cf1ca
                 ..default()
             },
         ))
@@ -275,16 +309,19 @@ fn main() {
             speed: 1.0,
             ..default()
         })
-        .insert_resource(UrdfRobotHandle(None))
+        .insert_resource(RobotDojoData {
+            urdf_handle: None,
+            reset_request: false,
+        })
         .insert_resource(LastSensorReading(None))
         .insert_resource(SimulationData {
             previous_translation: Vec3::ZERO,
         })
-        // .insert_resource(RapierFixedTimeStep {
-        //     fixed_time_step: 0.005, // 200x faster. Adjust this!
-        // })
         .add_systems(Startup, setup_scene)
-        .add_systems(Update, start_simulation.run_if(in_state(AppState::Loading)))
+        .add_systems(
+            Update,
+            handle_robot_loaded.run_if(in_state(AppState::Loading)),
+        )
         .add_systems(
             Update,
             (
@@ -292,6 +329,7 @@ fn main() {
                 handle_control_request,
                 handle_sensors_read,
                 handle_reset_event,
+                handle_robot_spawned,
             )
                 .run_if(in_state(AppState::Simulation)),
         )

@@ -9,7 +9,7 @@ API_STATE = "http://127.0.0.1:7878/state"
 API_RESET = "http://127.0.0.1:7878/reset"
 
 OBSERVATION_SIZE = 69
-ACTION_SIZE = 16
+ACTION_SIZE = 10
 
 
 class BevyRLEnv(gym.Env):
