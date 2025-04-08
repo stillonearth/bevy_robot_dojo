@@ -236,14 +236,14 @@ fn setup_scene(
             transform: Transform::from_xyz(7.0, 7.0, 7.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        // FlyCam,
+        FlyCam,
     ));
 
     // ground
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(180., 1.8, 180.))),
+        Mesh3d(meshes.add(Cuboid::new(5000., 0.1, 5000.))),
         MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-        Collider::cuboid(90., 0.9, 90.),
+        Collider::cuboid(10e5, 0.05, 10e5),
         Transform::from_xyz(0.0, -2.5, 0.0),
         RigidBody::Fixed,
     ));

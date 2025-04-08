@@ -16,6 +16,8 @@ class BevyRLEnv(gym.Env):
 
     def __init__(self):
 
+        self.step_count = 0
+
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(OBSERVATION_SIZE,), dtype=float
         )
@@ -47,12 +49,14 @@ class BevyRLEnv(gym.Env):
         is_terminated = step_data["is_terminated"]
         reward = step_data["reward"]
 
-        return obs, reward, is_terminated, False, {}
+        self.step_count += 1
+
+        return obs, reward, (0 == (self.step_count % 100)) or is_terminated, (0 == (self.step_count % 1000)) or is_terminated, {}
 
     def reset_env(self):
         requests.get(API_RESET)
 
-    def reset(self, seed):
+    def reset(self, seed=1337):
         self.reset_env()
         return self.get_obs(), {}
 
